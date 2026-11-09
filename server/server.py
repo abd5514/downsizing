@@ -18,7 +18,10 @@ process, which is what the project's no-storage privacy requirement asks for.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
+import os
+import secrets
 import threading
 import time
 from collections import Counter, deque
@@ -27,8 +30,8 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from drowsim import config as cfg
@@ -50,6 +53,31 @@ DEMO_CLIENT_ID = "DEMO_REPLAY"
 
 app = FastAPI(title="DrowSim Inference Server", version="2.0-yolo")
 _start_time = time.monotonic()
+
+# When DROWSIM_PASSWORD is set (as on a public host) every route except the
+# health check needs HTTP Basic auth with that password; any username works.
+ACCESS_PASSWORD = os.environ.get("DROWSIM_PASSWORD", "")
+OPEN_PATHS = {"/health"}
+
+
+def _password_ok(header: str) -> bool:
+    scheme, _, value = header.partition(" ")
+    if scheme.lower() != "basic":
+        return False
+    try:
+        _, _, password = base64.b64decode(value).decode("utf-8").partition(":")
+    except (ValueError, UnicodeDecodeError):
+        return False
+    return secrets.compare_digest(password.encode(), ACCESS_PASSWORD.encode())
+
+
+@app.middleware("http")
+async def require_password(request: Request, call_next):
+    if (ACCESS_PASSWORD and request.url.path not in OPEN_PATHS
+            and not _password_ok(request.headers.get("authorization", ""))):
+        return Response(status_code=401,
+                        headers={"WWW-Authenticate": 'Basic realm="DrowSim"'})
+    return await call_next(request)
 
 
 @dataclass

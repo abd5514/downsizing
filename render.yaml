@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: drowsim
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DROWSIM_PASSWORD
+        sync: false

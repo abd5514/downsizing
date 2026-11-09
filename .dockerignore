@@ -1,0 +1,10 @@
+.venv
+.git
+node_modules
+data
+runs
+deliverables
+build
+*.pt
+!models/bilstm_attention.pt
+**/__pycache__

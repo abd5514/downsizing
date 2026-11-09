@@ -4,6 +4,7 @@ __pycache__/
 data/
 runs/
 models/*.pt
+!models/bilstm_attention.pt
 models/*.onnx
 *.wav
 .DS_Store
@@ -13,4 +14,3 @@ deliverables/**/*.mp4
 deliverables/**/*.docx
 deliverables/**/*.pptx
 deliverables/**/*.png
-build/

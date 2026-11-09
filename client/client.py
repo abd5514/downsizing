@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 import uuid
 from collections import deque
@@ -45,6 +46,9 @@ class ServerLink:
         self.last_response: dict | None = None
         self.rtt_ms: float = 0.0
         self._session = requests.Session()
+        password = os.environ.get("DROWSIM_PASSWORD")
+        if password:
+            self._session.auth = ("drowsim", password)
 
     def send(self, payload: dict) -> dict | None:
         if not self.enabled:

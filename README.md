@@ -127,6 +127,26 @@ reported mAP and the benchmark latency for each.
 Useful client flags: `--source path/to/video.mp4`, `--headless`, `--no-audio`,
 `--no-server` (proves the alarm still fires with the network gone).
 
+## Online deployment (Render, free plan)
+
+`render.yaml` and `Dockerfile` deploy the server and dashboard as one free web
+service. Only the server goes online; the YOLO client stays on the laptop.
+
+- **Password.** Render asks for `DROWSIM_PASSWORD` when the service is created.
+  Every route except `/health` then needs it (HTTP Basic, any username). The
+  client reads the same variable from its environment.
+- **Demo node.** `--demo server/demo_telemetry.jsonl` replays the 90 s test
+  clip's telemetry on a loop as `DEMO_REPLAY`, so the dashboard shows the system
+  working with no vehicle connected. Re-record it with
+  `client.client --source data/demo_clip.mp4 --no-server --record-telemetry server/demo_telemetry.jsonl`.
+- **Free-plan limits.** The service sleeps after 15 minutes without traffic and
+  takes about a minute to wake; the dashboard history is lost each time.
+
+```bash
+DROWSIM_PASSWORD='...' PYTHONPATH=. ./.venv/bin/python -m client.client \
+  --server https://<service>.onrender.com
+```
+
 ## Layout
 
 ```
