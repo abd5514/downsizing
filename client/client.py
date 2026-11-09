@@ -12,6 +12,7 @@ next read. Nothing but the feature vectors ever leaves this process.
 from __future__ import annotations
 
 import argparse
+import json
 import time
 import uuid
 from collections import deque
@@ -126,6 +127,9 @@ def main() -> None:
                         help="stop after N frames (used by the benchmark)")
     parser.add_argument("--record", default=None,
                         help="also write the annotated preview to this .mp4")
+    parser.add_argument("--record-telemetry", default=None,
+                        help="also append every telemetry packet to this .jsonl "
+                             "(the server's --demo replays it)")
     args = parser.parse_args()
 
     from ultralytics import YOLO
@@ -173,6 +177,10 @@ def main() -> None:
         writer = cv2.VideoWriter(args.record, fourcc, cfg.TARGET_FPS,
                                  (probe_w, probe_h))
         print(f"[client] recording annotated preview -> {args.record}")
+
+    telemetry_log = open(args.record_telemetry, "w") if args.record_telemetry else None
+    if telemetry_log is not None:
+        print(f"[client] recording telemetry -> {args.record_telemetry}")
 
     print(f"[client] session {session_id} started; press q to quit")
     try:
@@ -229,6 +237,8 @@ def main() -> None:
                     "blink_count": verdict.blink_count,
                     "total_yawns": verdict.total_yawns,
                 }
+                if telemetry_log is not None:
+                    telemetry_log.write(json.dumps(payload) + "\n")
                 response = link.send(payload)
                 server_state = response.get("state") if response else None
                 pending = []
@@ -281,6 +291,8 @@ def main() -> None:
         cap.release()
         if writer is not None:
             writer.release()
+        if telemetry_log is not None:
+            telemetry_log.close()
         if not args.headless:
             cv2.destroyAllWindows()
         alerts.close()

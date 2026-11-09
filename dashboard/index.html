@@ -76,6 +76,10 @@
 
 <script>
 const fmt = ts => new Date(ts * 1000).toLocaleTimeString();
+const esc = v => String(v).replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+const STATES = ['NORMAL', 'WARNING', 'CRITICAL', 'NO_FACE'];
+const cls = s => STATES.includes(s) ? s : 'NO_FACE';
 
 async function tick() {
   try {
@@ -93,10 +97,10 @@ async function tick() {
         <div class="node">
           <span class="dot" style="background:${s.online ? 'var(--normal)' : 'var(--noface)'}"></span>
           <div>
-            <div class="name">${s.client_id}</div>
-            <div class="meta">session ${s.session_id} &middot; last seen ${s.age_s}s ago</div>
+            <div class="name">${esc(s.client_id)}${s.demo ? ' <span class="src">recorded demo</span>' : ''}</div>
+            <div class="meta">session ${esc(s.session_id)} &middot; last seen ${esc(s.age_s)}s ago</div>
           </div>
-          <span class="state bg${s.state}">${s.state}</span>
+          <span class="state bg${cls(s.state)}">${esc(s.state)}</span>
         </div>`).join('');
     }
 
@@ -116,11 +120,11 @@ async function tick() {
     tbody.innerHTML = ev.events.map(e => `
       <tr>
         <td>${fmt(e.timestamp)}</td>
-        <td>${e.client_id}</td>
-        <td class="${e.state}"><strong>${e.state}</strong></td>
-        <td><span class="src">${e.source}</span></td>
+        <td>${esc(e.client_id)}</td>
+        <td class="${cls(e.state)}"><strong>${esc(e.state)}</strong></td>
+        <td><span class="src">${esc(e.source)}</span></td>
         <td>${e.perclos ? (e.perclos * 100).toFixed(0) + '%' : '&mdash;'}</td>
-        <td class="reason">${e.reasons.join(' | ') || '&mdash;'}</td>
+        <td class="reason">${esc(e.reasons.join(' | ')) || '&mdash;'}</td>
       </tr>`).join('');
   } catch (err) {
     document.getElementById('conn').textContent = 'server unreachable';

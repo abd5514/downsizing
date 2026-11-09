@@ -18,6 +18,8 @@ process, which is what the project's no-storage privacy requirement asks for.
 from __future__ import annotations
 
 import argparse
+import json
+import threading
 import time
 from collections import Counter, deque
 from dataclasses import dataclass, field
@@ -41,7 +43,10 @@ from drowsim.protocol import (
 from drowsim.rules import RuleEngine
 
 MAX_EVENTS = 500
+MAX_SESSIONS = 50
 SESSION_TTL_S = 300.0
+DEMO_SESSION_ID = "demo"
+DEMO_CLIENT_ID = "DEMO_REPLAY"
 
 app = FastAPI(title="DrowSim Inference Server", version="2.0-yolo")
 _start_time = time.monotonic()
@@ -88,6 +93,7 @@ class ModelHolder:
 models = ModelHolder()
 sessions: dict[str, Session] = {}
 events: deque[SessionEvent] = deque(maxlen=MAX_EVENTS)
+_state_lock = threading.Lock()
 
 
 def _reap_sessions(now: float) -> None:
@@ -119,6 +125,13 @@ def _rule_state_from_packet(session: Session, packet: TelemetryPacket) -> object
 
 @app.post("/infer", response_model=InferenceResponse)
 def infer(packet: TelemetryPacket) -> InferenceResponse:
+    if packet.session_id == DEMO_SESSION_ID:
+        raise HTTPException(422, "session id is reserved")
+    with _state_lock:
+        return _infer(packet)
+
+
+def _infer(packet: TelemetryPacket) -> InferenceResponse:
     started = time.perf_counter()
     now = time.monotonic()
     _reap_sessions(now)
@@ -128,6 +141,8 @@ def infer(packet: TelemetryPacket) -> InferenceResponse:
 
     session = sessions.get(packet.session_id)
     if session is None:
+        if len(sessions) >= MAX_SESSIONS and packet.session_id != DEMO_SESSION_ID:
+            raise HTTPException(429, "too many active sessions")
         session = Session(client_id=packet.client_id)
         sessions[packet.session_id] = session
 
@@ -212,19 +227,50 @@ def health() -> HealthResponse:
 @app.get("/events")
 def get_events(limit: int = 50) -> dict:
     now = time.monotonic()
-    return {
-        "events": [e.model_dump() for e in list(events)[:limit]],
-        "sessions": [
-            {
-                "session_id": sid,
-                "client_id": s.client_id,
-                "state": s.last_state or cfg.STATE_NORMAL,
-                "age_s": round(now - s.last_seen, 1),
-                "online": (now - s.last_seen) < 5.0,
-            }
-            for sid, s in sessions.items()
-        ],
-    }
+    with _state_lock:
+        return {
+            "events": [e.model_dump() for e in list(events)[:max(0, min(limit, MAX_EVENTS))]],
+            "sessions": [
+                {
+                    "session_id": sid,
+                    "client_id": s.client_id,
+                    "state": s.last_state or cfg.STATE_NORMAL,
+                    "age_s": round(now - s.last_seen, 1),
+                    "online": (now - s.last_seen) < 5.0,
+                    "demo": sid == DEMO_SESSION_ID,
+                }
+                for sid, s in sessions.items()
+            ],
+        }
+
+
+def _demo_loop(path: Path, pause_s: float = 3.0) -> None:
+    """Replay recorded telemetry through the same inference path a live
+    vehicle uses, so a visitor sees the system working with no car connected.
+    The recording holds numbers only, exactly what a client would send."""
+    packets = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    if not packets:
+        print(f"[server] demo file {path} is empty; demo disabled")
+        return
+    print(f"[server] demo replay: {len(packets)} packets from {path}, looping")
+    while True:
+        with _state_lock:
+            sessions.pop(DEMO_SESSION_ID, None)
+        start = time.monotonic()
+        first_ts = packets[0]["timestamp"]
+        for raw in packets:
+            due = start + (raw["timestamp"] - first_ts)
+            time.sleep(max(0.0, due - time.monotonic()))
+            packet = TelemetryPacket(
+                **{**raw, "client_id": DEMO_CLIENT_ID,
+                   "session_id": DEMO_SESSION_ID, "timestamp": due}
+            )
+            try:
+                with _state_lock:
+                    _infer(packet)
+            except HTTPException as exc:
+                print(f"[server] demo packet rejected: {exc.detail}")
+        time.sleep(pause_s)
 
 
 DASHBOARD = Path(__file__).resolve().parents[1] / "dashboard"
@@ -241,9 +287,13 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--bilstm", default="models/bilstm_attention.pt")
+    parser.add_argument("--demo", default=None,
+                        help="loop this recorded telemetry .jsonl as a DEMO_REPLAY node")
     args = parser.parse_args()
 
     models.load(args.bilstm)
+    if args.demo:
+        threading.Thread(target=_demo_loop, args=(Path(args.demo),), daemon=True).start()
     import uvicorn
 
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")

@@ -15,8 +15,8 @@ from drowsim.config import FEATURE_DIM
 class TelemetryPacket(BaseModel):
     """One aggregated telemetry tick from a vehicle node."""
 
-    client_id: str = Field(..., description="Stable pseudonymous node id")
-    session_id: str = Field(..., description="New id per driving session")
+    client_id: str = Field(..., max_length=64, description="Stable pseudonymous node id")
+    session_id: str = Field(..., max_length=64, description="New id per driving session")
     seq: int = Field(..., ge=0, description="Monotonic counter, for loss detection")
     timestamp: float = Field(..., description="Client monotonic seconds")
     fps: float = Field(..., ge=0.0)
@@ -26,7 +26,8 @@ class TelemetryPacket(BaseModel):
     # the buffer and lets it refill (about two seconds) rather than reasoning
     # over a sequence with a hole in it.
     features: list[list[float]] = Field(
-        ..., description="New frames since the last packet, each FEATURE_DIM wide"
+        ..., max_length=100,
+        description="New frames since the last packet, each FEATURE_DIM wide",
     )
 
     face_found: bool = True
