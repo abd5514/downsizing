@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DrowSim Monitoring</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --line:#252a34; --text:#e8eaed; --muted:#9aa3b2;
+    --normal:#3ecf6d; --warning:#f5b544; --critical:#ef4444; --noface:#7c8494;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{padding:20px 28px;border-bottom:1px solid var(--line);
+         display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  h1{margin:0;font-size:18px;letter-spacing:.2px}
+  .sub{color:var(--muted);font-size:13px}
+  .pill{margin-left:auto;font-size:12px;color:var(--muted);
+        border:1px solid var(--line);border-radius:999px;padding:4px 12px}
+  main{padding:24px 28px;display:grid;gap:24px;
+       grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+  .panel h2{margin:0 0 14px;font-size:12px;text-transform:uppercase;
+            letter-spacing:.08em;color:var(--muted);font-weight:600}
+  .node{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+  .node:last-child{border-bottom:none}
+  .dot{width:11px;height:11px;border-radius:50%;flex:none}
+  .name{font-weight:600}
+  .meta{color:var(--muted);font-size:12px}
+  .state{margin-left:auto;font-weight:700;font-size:12px;letter-spacing:.05em;
+         padding:4px 10px;border-radius:6px}
+  .NORMAL{color:var(--normal)}      .bgNORMAL{background:rgba(62,207,109,.14);color:var(--normal)}
+  .WARNING{color:var(--warning)}    .bgWARNING{background:rgba(245,181,68,.16);color:var(--warning)}
+  .CRITICAL{color:var(--critical)}  .bgCRITICAL{background:rgba(239,68,68,.16);color:var(--critical)}
+  .NO_FACE{color:var(--noface)}     .bgNO_FACE{background:rgba(124,132,148,.16);color:var(--noface)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;color:var(--muted);font-weight:600;font-size:11px;
+     text-transform:uppercase;letter-spacing:.06em;padding:0 10px 10px 0}
+  td{padding:9px 10px 9px 0;border-top:1px solid var(--line);vertical-align:top}
+  td.reason{color:var(--muted)}
+  .src{font-size:11px;color:var(--muted);border:1px solid var(--line);
+       border-radius:4px;padding:1px 6px}
+  .empty{color:var(--muted);padding:16px 0;text-align:center}
+  .wide{grid-column:1/-1}
+</style>
+</head>
+<body>
+<header>
+  <h1>DrowSim Monitoring</h1>
+  <span class="sub">telemetry only &mdash; no video is received or stored</span>
+  <span class="pill" id="conn">connecting&hellip;</span>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Vehicle nodes</h2>
+    <div id="nodes"><div class="empty">no nodes connected</div></div>
+  </section>
+
+  <section class="panel">
+    <h2>Server</h2>
+    <div id="health"><div class="empty">&mdash;</div></div>
+  </section>
+
+  <section class="panel wide">
+    <h2>Event log</h2>
+    <table>
+      <thead><tr><th>Time</th><th>Node</th><th>State</th><th>Source</th>
+                 <th>PERCLOS</th><th>Reason</th></tr></thead>
+      <tbody id="events"></tbody>
+    </table>
+    <div class="empty" id="noevents">no events yet</div>
+  </section>
+</main>
+
+<script>
+const fmt = ts => new Date(ts * 1000).toLocaleTimeString();
+
+async function tick() {
+  try {
+    const [ev, hl] = await Promise.all([
+      fetch('/events?limit=40').then(r => r.json()),
+      fetch('/health').then(r => r.json())
+    ]);
+    document.getElementById('conn').textContent = 'live';
+
+    const nodes = document.getElementById('nodes');
+    if (!ev.sessions.length) {
+      nodes.innerHTML = '<div class="empty">no nodes connected</div>';
+    } else {
+      nodes.innerHTML = ev.sessions.map(s => `
+        <div class="node">
+          <span class="dot" style="background:${s.online ? 'var(--normal)' : 'var(--noface)'}"></span>
+          <div>
+            <div class="name">${s.client_id}</div>
+            <div class="meta">session ${s.session_id} &middot; last seen ${s.age_s}s ago</div>
+          </div>
+          <span class="state bg${s.state}">${s.state}</span>
+        </div>`).join('');
+    }
+
+    document.getElementById('health').innerHTML = `
+      <div class="node"><div><div class="name">Status</div>
+        <div class="meta">uptime ${hl.uptime_s}s</div></div>
+        <span class="state bgNORMAL">${hl.status.toUpperCase()}</span></div>
+      <div class="node"><div><div class="name">BiLSTM model</div>
+        <div class="meta">temporal classifier</div></div>
+        <span class="state ${hl.model_loaded ? 'bgNORMAL' : 'bgNO_FACE'}">
+          ${hl.model_loaded ? 'LOADED' : 'RULES ONLY'}</span></div>
+      <div class="node"><div><div class="name">Active sessions</div></div>
+        <span class="state bgNO_FACE">${hl.active_sessions}</span></div>`;
+
+    const tbody = document.getElementById('events');
+    document.getElementById('noevents').style.display = ev.events.length ? 'none' : 'block';
+    tbody.innerHTML = ev.events.map(e => `
+      <tr>
+        <td>${fmt(e.timestamp)}</td>
+        <td>${e.client_id}</td>
+        <td class="${e.state}"><strong>${e.state}</strong></td>
+        <td><span class="src">${e.source}</span></td>
+        <td>${e.perclos ? (e.perclos * 100).toFixed(0) + '%' : '&mdash;'}</td>
+        <td class="reason">${e.reasons.join(' | ') || '&mdash;'}</td>
+      </tr>`).join('');
+  } catch (err) {
+    document.getElementById('conn').textContent = 'server unreachable';
+  }
+}
+tick();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>
