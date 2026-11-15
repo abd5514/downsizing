@@ -18,6 +18,10 @@
   .sub{color:var(--muted);font-size:13px}
   .pill{margin-left:auto;font-size:12px;color:var(--muted);
         border:1px solid var(--line);border-radius:999px;padding:4px 12px}
+  .signout{margin:0}
+  .signout button{font:inherit;font-size:12px;color:var(--text);background:none;cursor:pointer;
+                  border:1px solid var(--line);border-radius:999px;padding:4px 12px}
+  .signout button:hover{border-color:var(--muted)}
   main{padding:24px 28px;display:grid;gap:24px;
        grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
@@ -50,6 +54,9 @@
   <h1>DrowSim Monitoring</h1>
   <span class="sub">telemetry only &mdash; no video is received or stored</span>
   <span class="pill" id="conn">connecting&hellip;</span>
+  <form class="signout" id="signout" method="post" action="/logout" hidden>
+    <button type="submit">Sign out</button>
+  </form>
 </header>
 
 <main>
@@ -83,11 +90,11 @@ const cls = s => STATES.includes(s) ? s : 'NO_FACE';
 
 async function tick() {
   try {
-    const [ev, hl] = await Promise.all([
-      fetch('/events?limit=40').then(r => r.json()),
-      fetch('/health').then(r => r.json())
-    ]);
+    const [evRes, hlRes] = await Promise.all([fetch('/events?limit=40'), fetch('/health')]);
+    if (evRes.status === 401) { location.href = '/'; return; }
+    const [ev, hl] = await Promise.all([evRes.json(), hlRes.json()]);
     document.getElementById('conn').textContent = 'live';
+    document.getElementById('signout').hidden = !hl.auth_required;
 
     const nodes = document.getElementById('nodes');
     if (!ev.sessions.length) {

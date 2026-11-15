@@ -76,3 +76,4 @@ class HealthResponse(BaseModel):
     model_loaded: bool = False
     uptime_s: float = 0.0
     active_sessions: int = 0
+    auth_required: bool = False

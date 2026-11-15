@@ -19,20 +19,21 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
+import hmac
 import json
 import os
-import secrets
 import threading
 import time
 from collections import Counter, deque
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import parse_qs
 
 import numpy as np
 import torch
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, Response
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
 from drowsim import config as cfg
 from drowsim.features import FrameFeatures
@@ -54,13 +55,37 @@ DEMO_CLIENT_ID = "DEMO_REPLAY"
 app = FastAPI(title="DrowSim Inference Server", version="2.0-yolo")
 _start_time = time.monotonic()
 
-# When DROWSIM_PASSWORD is set (as on a public host) every route except the
-# health check needs HTTP Basic auth with that password; any username works.
+# When DROWSIM_PASSWORD is set (as on a public host) the site is admin-only.
+# People sign in on the landing page and carry a signed session cookie; the
+# vehicle client sends the same password with HTTP Basic auth instead.
 ACCESS_PASSWORD = os.environ.get("DROWSIM_PASSWORD", "")
-OPEN_PATHS = {"/health"}
+ADMIN_USER = os.environ.get("DROWSIM_ADMIN_USER", "admin")
+AUTH_ENABLED = bool(ACCESS_PASSWORD)
+OPEN_PATHS = {"/", "/login", "/logout", "/health"}
+SESSION_COOKIE = "drowsim_session"
+LOGIN_TTL_S = 12 * 3600
+LOGIN_FAILURES_PER_MIN = 10
+MAX_LOGIN_BODY = 4096
+
+# Derived from the password, so sessions survive a restart and changing the
+# password signs everyone out.
+_SIGNING_KEY = hmac.new(ACCESS_PASSWORD.encode(), b"drowsim-session-v1", hashlib.sha256).digest()
+_failed_logins: deque[float] = deque()
 
 
-def _password_ok(header: str) -> bool:
+def _sign(expires: int) -> str:
+    message = f"{ADMIN_USER}|{expires}".encode()
+    return hmac.new(_SIGNING_KEY, message, hashlib.sha256).hexdigest()
+
+
+def _session_ok(cookie: str | None) -> bool:
+    expires, _, signature = (cookie or "").partition(".")
+    if not expires.isdigit() or int(expires) < time.time():
+        return False
+    return hmac.compare_digest(signature, _sign(int(expires)))
+
+
+def _basic_ok(header: str) -> bool:
     scheme, _, value = header.partition(" ")
     if scheme.lower() != "basic":
         return False
@@ -68,16 +93,30 @@ def _password_ok(header: str) -> bool:
         _, _, password = base64.b64decode(value).decode("utf-8").partition(":")
     except (ValueError, UnicodeDecodeError):
         return False
-    return secrets.compare_digest(password.encode(), ACCESS_PASSWORD.encode())
+    return hmac.compare_digest(password.encode(), ACCESS_PASSWORD.encode())
+
+
+def _authenticated(request: Request) -> bool:
+    return (
+        not AUTH_ENABLED
+        or _session_ok(request.cookies.get(SESSION_COOKIE))
+        or _basic_ok(request.headers.get("authorization", ""))
+    )
+
+
+def _login_throttled(now: float) -> bool:
+    while _failed_logins and now - _failed_logins[0] > 60.0:
+        _failed_logins.popleft()
+    return len(_failed_logins) >= LOGIN_FAILURES_PER_MIN
 
 
 @app.middleware("http")
-async def require_password(request: Request, call_next):
-    if (ACCESS_PASSWORD and request.url.path not in OPEN_PATHS
-            and not _password_ok(request.headers.get("authorization", ""))):
-        return Response(status_code=401,
-                        headers={"WWW-Authenticate": 'Basic realm="DrowSim"'})
-    return await call_next(request)
+async def require_login(request: Request, call_next):
+    if request.url.path in OPEN_PATHS or _authenticated(request):
+        return await call_next(request)
+    if request.method == "GET" and "text/html" in request.headers.get("accept", ""):
+        return RedirectResponse("/", status_code=303)
+    return JSONResponse({"detail": "login required"}, status_code=401)
 
 
 @dataclass
@@ -249,6 +288,7 @@ def health() -> HealthResponse:
         model_loaded=models.loaded,
         uptime_s=round(time.monotonic() - _start_time, 1),
         active_sessions=len(sessions),
+        auth_required=AUTH_ENABLED,
     )
 
 
@@ -302,12 +342,55 @@ def _demo_loop(path: Path, pause_s: float = 3.0) -> None:
 
 
 DASHBOARD = Path(__file__).resolve().parents[1] / "dashboard"
-if DASHBOARD.exists():
-    app.mount("/static", StaticFiles(directory=DASHBOARD), name="static")
+NO_STORE = {"Cache-Control": "no-store"}
 
-    @app.get("/")
-    def dashboard() -> FileResponse:
-        return FileResponse(DASHBOARD / "index.html")
+
+@app.get("/")
+def landing(request: Request) -> Response:
+    if _authenticated(request):
+        return RedirectResponse("/dashboard", status_code=303)
+    return FileResponse(DASHBOARD / "login.html", headers=NO_STORE)
+
+
+@app.post("/login")
+async def login(request: Request) -> Response:
+    if not AUTH_ENABLED:
+        return RedirectResponse("/dashboard", status_code=303)
+    now = time.monotonic()
+    if _login_throttled(now):
+        return RedirectResponse("/?error=busy", status_code=303)
+    body = await request.body()
+    if len(body) > MAX_LOGIN_BODY:
+        return RedirectResponse("/?error=1", status_code=303)
+    form = parse_qs(body.decode("utf-8", "replace"))
+    username = form.get("username", [""])[0]
+    password = form.get("password", [""])[0]
+    user_ok = hmac.compare_digest(username.encode(), ADMIN_USER.encode())
+    password_ok = hmac.compare_digest(password.encode(), ACCESS_PASSWORD.encode())
+    if not (user_ok and password_ok):
+        _failed_logins.append(now)
+        return RedirectResponse("/?error=1", status_code=303)
+
+    expires = int(time.time()) + LOGIN_TTL_S
+    response = RedirectResponse("/dashboard", status_code=303)
+    response.set_cookie(
+        SESSION_COOKIE, f"{expires}.{_sign(expires)}", max_age=LOGIN_TTL_S,
+        httponly=True, samesite="lax", path="/",
+        secure=request.headers.get("x-forwarded-proto", request.url.scheme) == "https",
+    )
+    return response
+
+
+@app.post("/logout")
+def logout() -> Response:
+    response = RedirectResponse("/", status_code=303)
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return response
+
+
+@app.get("/dashboard")
+def dashboard() -> FileResponse:
+    return FileResponse(DASHBOARD / "index.html", headers=NO_STORE)
 
 
 def main() -> None:

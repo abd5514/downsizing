@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DrowSim Admin</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --line:#252a34; --text:#e8eaed; --muted:#9aa3b2;
+    --accent:#3ecf6d; --critical:#ef4444; --field:#0f1115;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+       display:flex;flex-direction:column}
+  header{padding:20px 28px;border-bottom:1px solid var(--line);
+         display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  h1{margin:0;font-size:18px;letter-spacing:.2px}
+  .sub{color:var(--muted);font-size:13px}
+  main{flex:1;display:flex;align-items:center;justify-content:center;padding:32px 16px}
+  .card{width:100%;max-width:380px;background:var(--panel);border:1px solid var(--line);
+        border-radius:12px;padding:28px}
+  .card h2{margin:0 0 4px;font-size:20px}
+  .card p{margin:0 0 22px;color:var(--muted);font-size:13px}
+  label{display:block;font-size:12px;font-weight:600;color:var(--muted);
+        text-transform:uppercase;letter-spacing:.06em;margin:0 0 6px}
+  input{width:100%;padding:11px 12px;margin:0 0 16px;border-radius:8px;
+        border:1px solid var(--line);background:var(--field);color:var(--text);font:inherit}
+  input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(62,207,109,.18)}
+  button{width:100%;margin-top:6px;padding:11px 12px;border:0;border-radius:8px;
+         background:var(--accent);color:#08130c;font:inherit;font-weight:700;cursor:pointer}
+  button:hover{filter:brightness(1.07)}
+  button:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+  .error{display:none;margin:0 0 16px;padding:10px 12px;border-radius:8px;font-size:13px;
+         background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);color:#fca5a5}
+  .error.show{display:block}
+  footer{padding:16px 28px;color:var(--muted);font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1>DrowSim</h1>
+  <span class="sub">driver drowsiness monitoring</span>
+</header>
+
+<main>
+  <form class="card" method="post" action="/login">
+    <h2>Admin sign in</h2>
+    <p>Sign in to open the live monitoring dashboard.</p>
+    <div class="error" id="error" role="alert"></div>
+    <label for="username">Username</label>
+    <input id="username" name="username" autocomplete="username" required autofocus>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">Sign in</button>
+  </form>
+</main>
+
+<footer>Telemetry only &mdash; no video is received or stored.</footer>
+
+<script>
+const messages = {
+  '1': 'Wrong username or password.',
+  'busy': 'Too many failed sign-ins. Wait a minute and try again.'
+};
+const code = new URLSearchParams(location.search).get('error');
+if (code && messages[code]) {
+  const box = document.getElementById('error');
+  box.textContent = messages[code];
+  box.classList.add('show');
+}
+</script>
+</body>
+</html>
