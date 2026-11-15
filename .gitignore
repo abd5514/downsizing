@@ -14,3 +14,4 @@ deliverables/**/*.mp4
 deliverables/**/*.docx
 deliverables/**/*.pptx
 deliverables/**/*.png
+server/demo/demo_timeline.json

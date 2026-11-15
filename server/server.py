@@ -465,6 +465,7 @@ async def update_profile(request: Request) -> Response:
 DEMO_DIR = Path(__file__).resolve().parent / "demo"
 DEMO_CLIP = DEMO_DIR / "demo_clip.mp4"
 DEMO_LABELS = DEMO_DIR / "demo_clip_labels.json"
+DEMO_TIMELINE = DEMO_DIR / "demo_timeline.json"
 DEMO_SEGMENTS = {
     "alert": {"frames": [82, 152], "title": "ALERT \u2192 NORMAL",
               "text": "Eyes open and attentive: the alert score stays high, the badge stays green."},
@@ -535,7 +536,12 @@ def demo_timeline() -> dict:
         raise HTTPException(404, "the demo recording is not available on this server")
     with _timeline_lock:
         if _timeline_cache is None:
-            _timeline_cache = _build_timeline(_demo_path)
+            # Built when the image is built, because computing it on a small
+            # host takes longer than a browser will wait.
+            if DEMO_TIMELINE.exists():
+                _timeline_cache = json.loads(DEMO_TIMELINE.read_text())
+            else:
+                _timeline_cache = _build_timeline(_demo_path)
         return _timeline_cache
 
 
@@ -553,9 +559,18 @@ def main() -> None:
     parser.add_argument("--bilstm", default="models/bilstm_attention.pt")
     parser.add_argument("--demo", default=None,
                         help="loop this recorded telemetry .jsonl as a DEMO_REPLAY node")
+    parser.add_argument("--write-timeline", default=None,
+                        help="write the demo timeline JSON to this path and exit")
     args = parser.parse_args()
 
     models.load(args.bilstm)
+    if args.write_timeline:
+        if not args.demo:
+            parser.error("--write-timeline needs --demo")
+        timeline = _build_timeline(Path(args.demo))
+        Path(args.write_timeline).write_text(json.dumps(timeline))
+        print(f"[server] demo timeline written to {args.write_timeline}")
+        return
     if args.demo:
         global _demo_path
         _demo_path = Path(args.demo)

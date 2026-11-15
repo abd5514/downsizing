@@ -310,14 +310,25 @@ async function generate(state, layout, label) {
 
   await new Promise(resolve => {
     const endT = end / fps;
+    let done = false, last = 0;
     const tick = () => {
+      if (done) return;
+      last = performance.now();
       const t = video.currentTime;
       const frame = Math.min(end - 1, Math.max(start, Math.floor(t * fps + 1e-3)));
       drawFrame(layout, frame, seg, clock);
       progress((t - start / fps) / (endT - start / fps));
-      if (t >= endT || video.ended) { video.pause(); setTimeout(resolve, 200); return; }
+      if (t >= endT || video.ended) {
+        done = true; clearInterval(watchdog); video.pause(); setTimeout(resolve, 200); return;
+      }
       requestAnimationFrame(tick);
     };
+    // Animation frames stop when the tab is hidden; the timer keeps the
+    // recording moving so it always finishes.
+    const watchdog = setInterval(() => {
+      if (document.hidden) status('Keep this tab in front, or the video will be choppy.');
+      if (performance.now() - last > 120) tick();
+    }, 100);
     requestAnimationFrame(tick);
   });
   recorder.stop();
@@ -371,6 +382,24 @@ $('all').addEventListener('click', () => {
   run(jobs);
 });
 
+async function loadTimeline() {
+  const attempts = 12;
+  for (let i = 1; i <= attempts; i++) {
+    let res = null;
+    try { res = await fetch('/api/demo/timeline', {cache: 'no-store'}); } catch (_) { res = null; }
+    if (res && res.status === 401) { location.href = '/login'; return null; }
+    const isJson = res && (res.headers.get('content-type') || '').includes('application/json');
+    if (res && res.ok && isJson) return res.json();
+    if (res && isJson && res.status < 500) {
+      throw new Error((await res.json()).detail || res.statusText);
+    }
+    if (i === attempts) break;
+    status(`The server is starting up or restarting. Trying again (${i} of ${attempts - 1})…`);
+    await new Promise(r => setTimeout(r, 5000));
+  }
+  throw new Error('the server did not answer. Reload the page in a minute.');
+}
+
 async function init() {
   fetch('/health').then(r => r.json()).then(h => { $('signout').hidden = !h.auth_required; }).catch(() => {});
   if (!pickMime() || !HTMLCanvasElement.prototype.captureStream) {
@@ -378,10 +407,8 @@ async function init() {
     return;
   }
   try {
-    const tlRes = await fetch('/api/demo/timeline');
-    if (tlRes.status === 401) { location.href = '/login'; return; }
-    if (!tlRes.ok) throw new Error((await tlRes.json()).detail || tlRes.statusText);
-    timeline = await tlRes.json();
+    timeline = await loadTimeline();
+    if (!timeline) return;
     const clip = await fetch('/api/demo/clip');
     if (!clip.ok) throw new Error('the demo clip could not be loaded');
     video.src = URL.createObjectURL(await clip.blob());

@@ -16,6 +16,8 @@ COPY --chown=app drowsim/ drowsim/
 COPY --chown=app server/ server/
 COPY --chown=app dashboard/ dashboard/
 COPY --chown=app models/bilstm_attention.pt models/bilstm_attention.pt
+RUN python server/server.py --bilstm models/bilstm_attention.pt --demo server/demo_telemetry.jsonl \
+    --write-timeline server/demo/demo_timeline.json
 
 EXPOSE 10000
 CMD ["sh", "-c", "exec python server/server.py --host 0.0.0.0 --port ${PORT:-10000} --bilstm models/bilstm_attention.pt --demo server/demo_telemetry.jsonl"]
