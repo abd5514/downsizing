@@ -146,6 +146,13 @@ service. Only the server goes online; the YOLO client stays on the laptop.
   clip's telemetry on a loop as `DEMO_REPLAY`, so the dashboard shows the system
   working with no vehicle connected. Re-record it with
   `client.client --source data/demo_clip.mp4 --no-server --record-telemetry server/demo_telemetry.jsonl`.
+- **Videos.** `/videos` (admin only) makes a video per driver state (alert,
+  yawning, microsleep) in three layouts: driver, dashboard, or both side by
+  side. The server runs the demo recording through the same rules and BiLSTM
+  (`/api/demo/timeline`) and serves the clip (`server/demo/demo_clip.mp4`,
+  H.264); the browser draws and records the video, so the free plan needs no
+  ffmpeg or headless browser. `scripts/make_feature_videos.py` is the offline
+  equivalent.
 - **Free-plan limits.** The service sleeps after 15 minutes without traffic and
   takes about a minute to wake; the dashboard history is lost each time.
 
