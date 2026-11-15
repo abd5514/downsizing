@@ -137,6 +137,7 @@ class Session:
     last_seq: int = -1
     last_seen: float = 0.0
     last_state: str | None = None
+    scores: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
 class ModelHolder:
@@ -231,6 +232,14 @@ def _infer(packet: TelemetryPacket) -> InferenceResponse:
     session.last_seen = now
 
     rule_verdict = _rule_state_from_packet(session, packet)
+    if packet.features:
+        rows = np.asarray(packet.features, dtype=np.float32)
+        mean = rows.mean(axis=0)
+        session.scores = (
+            float(mean[cfg.IDX_ALERT]),
+            float(mean[cfg.IDX_YAWNING]),
+            float(mean[cfg.IDX_MICROSLEEP]),
+        )
     for row in packet.features:
         session.buffer.append(np.asarray(row, dtype=np.float32))
 
@@ -315,6 +324,11 @@ def get_events(limit: int = 50) -> dict:
                     "age_s": round(now - s.last_seen, 1),
                     "online": (now - s.last_seen) < 5.0,
                     "demo": sid == DEMO_SESSION_ID,
+                    "scores": {
+                        "alert": round(s.scores[0], 3),
+                        "yawning": round(s.scores[1], 3),
+                        "microsleep": round(s.scores[2], 3),
+                    },
                 }
                 for sid, s in sessions.items()
             ],

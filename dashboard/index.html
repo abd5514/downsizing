@@ -30,6 +30,16 @@
             letter-spacing:.08em;color:var(--muted);font-weight:600}
   .node{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
   .node:last-child{border-bottom:none}
+  .vehicle{padding-bottom:14px;border-bottom:1px solid var(--line)}
+  .vehicle:last-child{border-bottom:none;padding-bottom:0}
+  .vehicle .node{border-bottom:none}
+  .scores{padding-left:23px;display:grid;gap:6px}
+  .seen{font-size:12px;color:var(--muted);margin-bottom:2px}
+  .bar{display:grid;grid-template-columns:78px 1fr 38px;align-items:center;gap:10px;font-size:12px}
+  .bar-label{color:var(--muted)}
+  .bar-track{height:8px;border-radius:999px;background:var(--line);overflow:hidden}
+  .bar-fill{display:block;height:100%;border-radius:999px;transition:width .4s ease}
+  .bar-value{text-align:right;font-variant-numeric:tabular-nums}
   .dot{width:11px;height:11px;border-radius:50%;flex:none}
   .name{font-weight:600}
   .meta{color:var(--muted);font-size:12px}
@@ -89,6 +99,28 @@ const esc = v => String(v).replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const STATES = ['NORMAL', 'WARNING', 'CRITICAL', 'NO_FACE'];
 const cls = s => STATES.includes(s) ? s : 'NO_FACE';
+const CLASSES = [
+  ['alert', 'Alert', 'var(--normal)'],
+  ['yawning', 'Yawning', 'var(--warning)'],
+  ['microsleep', 'Microsleep', 'var(--critical)']
+];
+
+function scoreBlock(scores) {
+  if (!scores) return '';
+  const values = CLASSES.map(([key]) => Math.max(0, Math.min(1, Number(scores[key]) || 0)));
+  const total = values.reduce((a, b) => a + b, 0);
+  const top = values.indexOf(Math.max(...values));
+  const seen = total < 0.05
+    ? '<strong style="color:var(--noface)">No face</strong>'
+    : `<strong style="color:${CLASSES[top][2]}">${CLASSES[top][1]}</strong>`;
+  const bars = CLASSES.map(([, label, colour], i) => `
+    <div class="bar">
+      <span class="bar-label">${label}</span>
+      <span class="bar-track"><span class="bar-fill" style="width:${(values[i] * 100).toFixed(0)}%;background:${colour}"></span></span>
+      <span class="bar-value">${(values[i] * 100).toFixed(0)}%</span>
+    </div>`).join('');
+  return `<div class="scores"><div class="seen">Detector sees: ${seen}</div>${bars}</div>`;
+}
 
 async function tick() {
   try {
@@ -103,13 +135,16 @@ async function tick() {
       nodes.innerHTML = '<div class="empty">no nodes connected</div>';
     } else {
       nodes.innerHTML = ev.sessions.map(s => `
-        <div class="node">
-          <span class="dot" style="background:${s.online ? 'var(--normal)' : 'var(--noface)'}"></span>
-          <div>
-            <div class="name">${esc(s.client_id)}${s.demo ? ' <span class="src">recorded demo</span>' : ''}</div>
-            <div class="meta">session ${esc(s.session_id)} &middot; last seen ${esc(s.age_s)}s ago</div>
+        <div class="vehicle">
+          <div class="node">
+            <span class="dot" style="background:${s.online ? 'var(--normal)' : 'var(--noface)'}"></span>
+            <div>
+              <div class="name">${esc(s.client_id)}${s.demo ? ' <span class="src">recorded demo</span>' : ''}</div>
+              <div class="meta">session ${esc(s.session_id)} &middot; last seen ${esc(s.age_s)}s ago</div>
+            </div>
+            <span class="state bg${cls(s.state)}">${esc(s.state)}</span>
           </div>
-          <span class="state bg${cls(s.state)}">${esc(s.state)}</span>
+          ${scoreBlock(s.scores)}
         </div>`).join('');
     }
 
