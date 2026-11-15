@@ -19,9 +19,10 @@
   .pill{margin-left:auto;font-size:12px;color:var(--muted);
         border:1px solid var(--line);border-radius:999px;padding:4px 12px}
   .signout{margin:0}
-  .signout button{font:inherit;font-size:12px;color:var(--text);background:none;cursor:pointer;
-                  border:1px solid var(--line);border-radius:999px;padding:4px 12px}
-  .signout button:hover{border-color:var(--muted)}
+  .navlink,.signout button{font:inherit;font-size:12px;color:var(--text);background:none;cursor:pointer;
+                  text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:4px 12px}
+  .navlink:hover,.signout button:hover{border-color:var(--muted)}
+  h1 a{color:inherit;text-decoration:none}
   main{padding:24px 28px;display:grid;gap:24px;
        grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
@@ -51,9 +52,10 @@
 </head>
 <body>
 <header>
-  <h1>DrowSim Monitoring</h1>
+  <h1><a href="/">DrowSim</a> Monitoring</h1>
   <span class="sub">telemetry only &mdash; no video is received or stored</span>
   <span class="pill" id="conn">connecting&hellip;</span>
+  <a class="navlink" href="/profile">Profile</a>
   <form class="signout" id="signout" method="post" action="/logout" hidden>
     <button type="submit">Sign out</button>
   </form>
@@ -91,7 +93,7 @@ const cls = s => STATES.includes(s) ? s : 'NO_FACE';
 async function tick() {
   try {
     const [evRes, hlRes] = await Promise.all([fetch('/events?limit=40'), fetch('/health')]);
-    if (evRes.status === 401) { location.href = '/'; return; }
+    if (evRes.status === 401) { location.href = '/login'; return; }
     const [ev, hl] = await Promise.all([evRes.json(), hlRes.json()]);
     document.getElementById('conn').textContent = 'live';
     document.getElementById('signout').hidden = !hl.auth_required;

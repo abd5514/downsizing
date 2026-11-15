@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DrowSim</title>
+<meta name="description" content="DrowSim detects driver drowsiness from an ordinary camera without sending any video off the vehicle.">
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --line:#252a34; --text:#e8eaed; --muted:#9aa3b2;
+    --accent:#3ecf6d; --warning:#f5b544; --critical:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  a{color:inherit}
+  header{padding:18px 28px;border-bottom:1px solid var(--line);
+         display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .brand{font-weight:700;font-size:18px;text-decoration:none}
+  nav{margin-left:auto;display:flex;gap:10px;flex-wrap:wrap}
+  .btn{display:inline-block;text-decoration:none;font-size:13px;font-weight:600;
+       padding:8px 16px;border-radius:999px;border:1px solid var(--line)}
+  .btn:hover{border-color:var(--muted)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#08130c}
+  .btn.primary:hover{filter:brightness(1.07)}
+  main{max-width:980px;margin:0 auto;padding:0 20px}
+  .hero{padding:72px 0 56px}
+  .eyebrow{color:var(--accent);font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+  h1{font-size:clamp(30px,5vw,46px);line-height:1.15;margin:12px 0 18px;max-width:760px}
+  .lead{color:var(--muted);font-size:17px;max-width:660px;margin:0 0 28px}
+  .actions{display:flex;gap:12px;flex-wrap:wrap}
+  section{padding:40px 0;border-top:1px solid var(--line)}
+  h2{font-size:22px;margin:0 0 6px}
+  .sub{color:var(--muted);margin:0 0 24px}
+  .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px}
+  .card h3{margin:0 0 6px;font-size:16px}
+  .card p{margin:0;color:var(--muted);font-size:14px}
+  .step{font-size:12px;font-weight:700;color:var(--accent);margin-bottom:8px}
+  .states{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .tag{font-size:12px;font-weight:700;letter-spacing:.05em;padding:4px 10px;border-radius:6px}
+  .t-normal{background:rgba(62,207,109,.14);color:var(--accent)}
+  .t-warning{background:rgba(245,181,68,.16);color:var(--warning)}
+  .t-critical{background:rgba(239,68,68,.16);color:var(--critical)}
+  .stat{font-size:30px;font-weight:700;margin:0 0 4px}
+  .note{color:var(--muted);font-size:13px;margin-top:16px}
+  footer{border-top:1px solid var(--line);padding:24px 28px;color:var(--muted);font-size:13px;
+         display:flex;gap:12px;flex-wrap:wrap;justify-content:space-between}
+</style>
+</head>
+<body>
+<header>
+  <a class="brand" href="/">DrowSim</a>
+  <nav>
+    <a class="btn" href="/dashboard">Dashboard</a>
+    <a class="btn primary" href="/login">Admin sign in</a>
+  </nav>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="eyebrow">Driver drowsiness detection</div>
+    <h1>Wakes a tired driver without sending their face anywhere.</h1>
+    <p class="lead">DrowSim watches the driver through an ordinary camera, spots eye closure
+      and yawning on the device itself, and sounds the alarm locally. Only a handful of
+      numbers per frame ever leave the vehicle.</p>
+    <div class="actions">
+      <a class="btn primary" href="/dashboard">Open the live dashboard</a>
+      <a class="btn" href="#how">How it works</a>
+    </div>
+  </div>
+
+  <section id="how">
+    <h2>How it works</h2>
+    <p class="sub">Two tiers, one set of rules.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="step">1 &middot; In the vehicle</div>
+        <h3>Detect on the device</h3>
+        <p>A YOLOv8n model reads each camera frame and reports how alert, sleepy or
+          yawning the driver looks. The frame is discarded straight away.</p>
+      </div>
+      <div class="card">
+        <div class="step">2 &middot; Still in the vehicle</div>
+        <h3>Decide and alarm locally</h3>
+        <p>Eyes closed for 0.8 seconds raise a critical alarm at once, with no internet
+          needed. Eye closure over the last minute and repeated yawning raise warnings.</p>
+      </div>
+      <div class="card">
+        <div class="step">3 &middot; On this server</div>
+        <h3>Monitor the fleet</h3>
+        <p>The numbers reach this server, where a BiLSTM model adds a second opinion and
+          the dashboard shows every vehicle's state as it changes.</p>
+      </div>
+    </div>
+    <div class="states">
+      <span class="tag t-normal">NORMAL</span>
+      <span class="tag t-warning">WARNING</span>
+      <span class="tag t-critical">CRITICAL</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>What it detects</h2>
+    <p class="sub">The detector sorts every frame into one of three driver states.</p>
+    <div class="grid">
+      <div class="card"><span class="tag t-normal">ALERT</span>
+        <h3 style="margin-top:10px">Eyes open, attentive</h3>
+        <p>Shown as NORMAL. Ordinary blinks under 0.4 seconds are ignored.</p></div>
+      <div class="card"><span class="tag t-warning">YAWNING</span>
+        <h3 style="margin-top:10px">An early sign of fatigue</h3>
+        <p>Shown as WARNING, and three yawns within five minutes raise a warning on their own.</p></div>
+      <div class="card"><span class="tag t-critical">MICROSLEEP</span>
+        <h3 style="margin-top:10px">Eyes closed too long</h3>
+        <p>Shown as CRITICAL the moment the eyes stay closed for 0.8 seconds.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Privacy by design</h2>
+    <p class="sub">What crosses the network is seven numbers per frame.</p>
+    <div class="grid">
+      <div class="card"><h3>No video leaves the car</h3>
+        <p>Frames live in one variable on the device and are overwritten by the next one.</p></div>
+      <div class="card"><h3>Nothing is stored</h3>
+        <p>This server keeps sessions in memory only. Its history is gone when it restarts.</p></div>
+      <div class="card"><h3>Works offline</h3>
+        <p>The alarm runs on the device, so a lost connection never silences it.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Measured results</h2>
+    <p class="sub">Produced by this build, not quoted from elsewhere.</p>
+    <div class="grid">
+      <div class="card"><p class="stat">98.5%</p>
+        <p>detector accuracy on 3,810 unseen test frames</p></div>
+      <div class="card"><p class="stat">5 of 6</p>
+        <p>microsleeps caught on a 90-second labelled clip, with no false alarms</p></div>
+      <div class="card"><p class="stat">0.86 s</p>
+        <p>average time from eyes closing to the alarm</p></div>
+      <div class="card"><p class="stat">~8 ms</p>
+        <p>detection time per frame on a laptop</p></div>
+    </div>
+    <p class="note">One microsleep in six was missed on the test clip, and the training
+      backgrounds were synthetic. Both are stated as limitations.</p>
+  </section>
+</main>
+
+<footer>
+  <span>DrowSim &middot; driver drowsiness monitoring</span>
+  <span>Telemetry only &mdash; no video is received or stored.</span>
+</footer>
+</body>
+</html>

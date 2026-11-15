@@ -132,10 +132,13 @@ Useful client flags: `--source path/to/video.mp4`, `--headless`, `--no-audio`,
 `render.yaml` and `Dockerfile` deploy the server and dashboard as one free web
 service. Only the server goes online; the YOLO client stays on the laptop.
 
+- **Pages.** `/` is a public introduction, `/login` the admin sign-in,
+  `/dashboard` the live monitor and `/profile` the admin's name and email
+  (kept in memory; set `DROWSIM_ADMIN_NAME` and `DROWSIM_ADMIN_EMAIL` to make
+  them permanent).
 - **Admin sign-in.** Render asks for `DROWSIM_PASSWORD` when the service is
-  created. The site then opens on an admin sign-in page (`/`); username `admin`
-  (or `DROWSIM_ADMIN_USER`) and that password lead to the live dashboard at
-  `/dashboard`. The session lasts 12 hours, and failed sign-ins are capped at
+  created. Username `admin` (or `DROWSIM_ADMIN_USER`) and that password lead
+  to the live dashboard at `/dashboard`. The session lasts 12 hours, and failed sign-ins are capped at
   10 a minute across all visitors. The vehicle client sends the same password
   with HTTP Basic auth, read from its own `DROWSIM_PASSWORD`. With no password
   set (local runs) there is no sign-in and `/` goes straight to the dashboard.

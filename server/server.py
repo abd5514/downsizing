@@ -23,6 +23,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import threading
 import time
 from collections import Counter, deque
@@ -55,13 +56,21 @@ DEMO_CLIENT_ID = "DEMO_REPLAY"
 app = FastAPI(title="DrowSim Inference Server", version="2.0-yolo")
 _start_time = time.monotonic()
 
-# When DROWSIM_PASSWORD is set (as on a public host) the site is admin-only.
-# People sign in on the landing page and carry a signed session cookie; the
+# When DROWSIM_PASSWORD is set (as on a public host) the dashboard is
+# admin-only. People sign in at /login and carry a signed session cookie; the
 # vehicle client sends the same password with HTTP Basic auth instead.
 ACCESS_PASSWORD = os.environ.get("DROWSIM_PASSWORD", "")
 ADMIN_USER = os.environ.get("DROWSIM_ADMIN_USER", "admin")
 AUTH_ENABLED = bool(ACCESS_PASSWORD)
 OPEN_PATHS = {"/", "/login", "/logout", "/health"}
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+# Name and email live in memory: the free host has no disk, so edits last until
+# the next restart unless they are also set in the environment.
+admin_profile = {
+    "name": os.environ.get("DROWSIM_ADMIN_NAME", "Administrator"),
+    "email": os.environ.get("DROWSIM_ADMIN_EMAIL", ""),
+}
 SESSION_COOKIE = "drowsim_session"
 LOGIN_TTL_S = 12 * 3600
 LOGIN_FAILURES_PER_MIN = 10
@@ -115,7 +124,7 @@ async def require_login(request: Request, call_next):
     if request.url.path in OPEN_PATHS or _authenticated(request):
         return await call_next(request)
     if request.method == "GET" and "text/html" in request.headers.get("accept", ""):
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/login", status_code=303)
     return JSONResponse({"detail": "login required"}, status_code=401)
 
 
@@ -346,7 +355,12 @@ NO_STORE = {"Cache-Control": "no-store"}
 
 
 @app.get("/")
-def landing(request: Request) -> Response:
+def home() -> FileResponse:
+    return FileResponse(DASHBOARD / "home.html")
+
+
+@app.get("/login")
+def login_page(request: Request) -> Response:
     if _authenticated(request):
         return RedirectResponse("/dashboard", status_code=303)
     return FileResponse(DASHBOARD / "login.html", headers=NO_STORE)
@@ -358,10 +372,10 @@ async def login(request: Request) -> Response:
         return RedirectResponse("/dashboard", status_code=303)
     now = time.monotonic()
     if _login_throttled(now):
-        return RedirectResponse("/?error=busy", status_code=303)
+        return RedirectResponse("/login?error=busy", status_code=303)
     body = await request.body()
     if len(body) > MAX_LOGIN_BODY:
-        return RedirectResponse("/?error=1", status_code=303)
+        return RedirectResponse("/login?error=1", status_code=303)
     form = parse_qs(body.decode("utf-8", "replace"))
     username = form.get("username", [""])[0]
     password = form.get("password", [""])[0]
@@ -369,7 +383,7 @@ async def login(request: Request) -> Response:
     password_ok = hmac.compare_digest(password.encode(), ACCESS_PASSWORD.encode())
     if not (user_ok and password_ok):
         _failed_logins.append(now)
-        return RedirectResponse("/?error=1", status_code=303)
+        return RedirectResponse("/login?error=1", status_code=303)
 
     expires = int(time.time()) + LOGIN_TTL_S
     response = RedirectResponse("/dashboard", status_code=303)
@@ -391,6 +405,37 @@ def logout() -> Response:
 @app.get("/dashboard")
 def dashboard() -> FileResponse:
     return FileResponse(DASHBOARD / "index.html", headers=NO_STORE)
+
+
+@app.get("/profile")
+def profile_page() -> FileResponse:
+    return FileResponse(DASHBOARD / "profile.html", headers=NO_STORE)
+
+
+@app.get("/api/profile")
+def get_profile() -> dict:
+    return {"username": ADMIN_USER, "auth_required": AUTH_ENABLED, **admin_profile}
+
+
+@app.post("/api/profile")
+async def update_profile(request: Request) -> Response:
+    body = await request.body()
+    if len(body) > MAX_LOGIN_BODY:
+        return JSONResponse({"detail": "request too large"}, status_code=413)
+    try:
+        data = json.loads(body or b"{}")
+    except ValueError:
+        return JSONResponse({"detail": "invalid JSON"}, status_code=422)
+    if not isinstance(data, dict):
+        return JSONResponse({"detail": "invalid JSON"}, status_code=422)
+    name = str(data.get("name", "")).strip()
+    email = str(data.get("email", "")).strip()
+    if not 1 <= len(name) <= 80:
+        return JSONResponse({"detail": "Name must be 1 to 80 characters."}, status_code=422)
+    if email and (len(email) > 120 or not EMAIL_RE.match(email)):
+        return JSONResponse({"detail": "That email address does not look valid."}, status_code=422)
+    admin_profile.update(name=name, email=email)
+    return JSONResponse({"username": ADMIN_USER, **admin_profile})
 
 
 def main() -> None:
