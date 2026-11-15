@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DrowSim Videos</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --line:#252a34; --text:#e8eaed; --muted:#9aa3b2;
+    --normal:#3ecf6d; --warning:#f5b544; --critical:#ef4444; --noface:#7c8494;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{padding:20px 28px;border-bottom:1px solid var(--line);
+         display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  h1{margin:0;font-size:18px}
+  h1 a{color:inherit;text-decoration:none}
+  .sub{color:var(--muted);font-size:13px}
+  nav{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+  .navlink,nav button{font:inherit;font-size:12px;color:var(--text);background:none;cursor:pointer;
+     text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:4px 12px}
+  .navlink:hover,nav button:hover{border-color:var(--muted)}
+  .navlink.on{border-color:var(--muted)}
+  nav form{margin:0}
+  main{padding:24px 28px;max-width:1100px;display:grid;gap:24px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+  .panel h2{margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;
+            color:var(--muted);font-weight:600}
+  .panel p{margin:0 0 16px;color:var(--muted)}
+  .row{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end}
+  fieldset{border:0;margin:0;padding:0}
+  legend{font-size:12px;color:var(--muted);margin-bottom:6px}
+  .choices{display:flex;gap:6px;flex-wrap:wrap}
+  .choices label{border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px}
+  .choices input{position:absolute;opacity:0;pointer-events:none}
+  .choices input:checked + span{color:var(--text)}
+  .choices label:has(input:checked){border-color:var(--normal);background:rgba(62,207,109,.1)}
+  .choices input:focus-visible + span{outline:2px solid var(--text);outline-offset:3px}
+  .btn{font:inherit;font-weight:700;border:0;border-radius:8px;padding:9px 16px;cursor:pointer;
+       background:var(--normal);color:#08130c}
+  .btn.ghost{background:none;color:var(--text);border:1px solid var(--line);font-weight:600}
+  .btn:disabled{opacity:.5;cursor:default}
+  .status{margin-top:14px;color:var(--muted);min-height:21px}
+  .progress{height:6px;border-radius:999px;background:var(--line);overflow:hidden;margin-top:8px}
+  .progress span{display:block;height:100%;width:0;background:var(--normal);transition:width .2s}
+  .stage{margin-top:16px;width:100%;border-radius:8px;border:1px solid var(--line);background:#000;display:none}
+  .results{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+  .result{border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:8px}
+  .result video{width:100%;border-radius:6px;background:#000}
+  .result .name{font-weight:600;font-size:13px}
+  .result a{color:var(--normal);font-size:13px}
+  .empty{color:var(--muted)}
+  .note{font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1><a href="/">DrowSim</a> Videos</h1>
+  <span class="sub">made in this browser from the recorded demo</span>
+  <nav>
+    <a class="navlink" href="/dashboard">Dashboard</a>
+    <a class="navlink on" href="/videos" aria-current="page">Videos</a>
+    <a class="navlink" href="/profile">Profile</a>
+    <form id="signout" method="post" action="/logout" hidden><button type="submit">Sign out</button></form>
+  </nav>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Generate a video</h2>
+    <p>Pick a driver state and a layout. The server works out what the dashboard shows at every
+      frame, using the same rules and model as the live site; this page draws it and records the video.</p>
+    <div class="row">
+      <fieldset>
+        <legend>Driver state</legend>
+        <div class="choices" id="states">
+          <label><input type="radio" name="state" value="alert" checked><span>Alert</span></label>
+          <label><input type="radio" name="state" value="yawning"><span>Yawning</span></label>
+          <label><input type="radio" name="state" value="microsleep"><span>Microsleep</span></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Layout</legend>
+        <div class="choices" id="layouts">
+          <label><input type="radio" name="layout" value="side_by_side" checked><span>Driver + dashboard</span></label>
+          <label><input type="radio" name="layout" value="dashboard"><span>Dashboard only</span></label>
+          <label><input type="radio" name="layout" value="driver"><span>Driver only</span></label>
+        </div>
+      </fieldset>
+      <div class="row" style="gap:8px">
+        <button class="btn" id="one" disabled>Generate</button>
+        <button class="btn ghost" id="all" disabled>Generate all 9</button>
+      </div>
+    </div>
+    <div class="status" id="status" role="status">Loading the demo recording&hellip;</div>
+    <div class="progress"><span id="bar"></span></div>
+    <canvas class="stage" id="stage"></canvas>
+    <p class="note" style="margin:12px 0 0">Recording runs in real time (7 to 10 seconds a video). Keep this tab
+      open and in front until it finishes. Nothing is uploaded; the files are made on this computer.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Your videos</h2>
+    <div class="results" id="results"><div class="empty">None yet.</div></div>
+  </section>
+</main>
+
+<script>
+const COLORS = {bg:'#0f1115', panel:'#171a21', line:'#252a34', text:'#e8eaed', muted:'#9aa3b2',
+  NORMAL:'#3ecf6d', WARNING:'#f5b544', CRITICAL:'#ef4444', NO_FACE:'#7c8494'};
+const TINT = {NORMAL:'rgba(62,207,109,.14)', WARNING:'rgba(245,181,68,.16)',
+  CRITICAL:'rgba(239,68,68,.16)', NO_FACE:'rgba(124,132,148,.16)'};
+const FONT = '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
+const CLASSES = [['Alert', 0, COLORS.NORMAL], ['Yawning', 1, COLORS.WARNING], ['Microsleep', 2, COLORS.CRITICAL]];
+const LABELS = {alert:'Alert', yawning:'Yawning', microsleep:'Microsleep',
+  side_by_side:'Driver + dashboard', dashboard:'Dashboard only', driver:'Driver only'};
+const CAPTION_H = 70, DASH_W = 1280, DASH_H = 720;
+const SIZES = {driver:[640, 480], dashboard:[DASH_W, DASH_H], side_by_side:[960 + DASH_W, DASH_H]};
+
+const $ = id => document.getElementById(id);
+const canvas = $('stage'), ctx = canvas.getContext('2d');
+const video = document.createElement('video');
+video.muted = true; video.playsInline = true; video.preload = 'auto';
+let timeline = null, busy = false;
+
+function status(text) { $('status').textContent = text; }
+function progress(x) { $('bar').style.width = `${Math.round(Math.max(0, Math.min(1, x)) * 100)}%`; }
+const STATES = ['NORMAL', 'WARNING', 'CRITICAL', 'NO_FACE'];
+const safeState = s => STATES.includes(s) ? s : 'NO_FACE';
+
+function pickMime() {
+  const options = [['video/mp4;codecs=avc1.42E01E', 'mp4'], ['video/mp4', 'mp4'],
+    ['video/webm;codecs=vp9', 'webm'], ['video/webm;codecs=vp8', 'webm'], ['video/webm', 'webm']];
+  if (typeof MediaRecorder === 'undefined') return null;
+  return options.find(([m]) => MediaRecorder.isTypeSupported(m)) || null;
+}
+
+function stepFor(frame) {
+  const steps = timeline.steps;
+  let lo = 0, hi = steps.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (steps[mid].last_frame < frame) lo = mid + 1; else hi = mid;
+  }
+  return steps[lo];
+}
+
+function text(str, x, y, size, color, weight = 400, align = 'left') {
+  ctx.font = `${weight} ${size}px ${FONT}`;
+  ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'alphabetic';
+  ctx.fillText(str, x, y);
+}
+
+function roundRect(x, y, w, h, r, fill, stroke) {
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, r);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
+}
+
+function bar(x, y, w, value, color) {
+  roundRect(x, y, w, 8, 4, COLORS.line);
+  if (value > 0) roundRect(x, y, Math.max(8, w * value), 8, 4, color);
+}
+
+function badge(state, xRight, y) {
+  ctx.font = `700 12px ${FONT}`;
+  const w = ctx.measureText(state).width + 22;
+  roundRect(xRight - w, y, w, 26, 6, TINT[state]);
+  text(state, xRight - w / 2, y + 17, 12, COLORS[state], 700, 'center');
+}
+
+function clockFor(t, ctxClock) {
+  return new Date(ctxClock.base + (t - ctxClock.t0) * 1000).toLocaleTimeString();
+}
+
+function drawDashboard(ox, oy, frame, clock) {
+  const step = stepFor(frame);
+  const state = safeState(step.state);
+  ctx.save(); ctx.translate(ox, oy);
+  ctx.fillStyle = COLORS.bg; ctx.fillRect(0, 0, DASH_W, DASH_H);
+  text('DrowSim Monitoring', 28, 42, 18, COLORS.text, 700);
+  text('telemetry only — no video is received or stored', 210, 42, 13, COLORS.muted);
+  roundRect(DASH_W - 76, 24, 48, 26, 13, null, COLORS.line);
+  text('live', DASH_W - 52, 41, 12, COLORS.muted, 400, 'center');
+  ctx.fillStyle = COLORS.line; ctx.fillRect(0, 70, DASH_W, 1);
+
+  roundRect(28, 94, 600, 232, 12, COLORS.panel, COLORS.line);
+  text('VEHICLE NODES', 46, 124, 12, COLORS.muted, 600);
+  ctx.beginPath(); ctx.arc(52, 160, 5.5, 0, Math.PI * 2); ctx.fillStyle = COLORS.NORMAL; ctx.fill();
+  text('DEMO_REPLAY', 70, 158, 14, COLORS.text, 600);
+  roundRect(178, 145, 96, 20, 4, null, COLORS.line);
+  text('recorded demo', 226, 159, 11, COLORS.muted, 400, 'center');
+  text('session demo · last seen 0.1s ago', 70, 178, 12, COLORS.muted);
+  badge(state, 610, 146);
+
+  const scores = step.scores;
+  const total = scores.reduce((a, b) => a + b, 0);
+  const top = scores.indexOf(Math.max(...scores));
+  text('Detector sees:', 70, 214, 12, COLORS.muted);
+  const seen = total < 0.05 ? ['No face', COLORS.NO_FACE] : [CLASSES[top][0], CLASSES[top][2]];
+  text(seen[0], 152, 214, 12, seen[1], 700);
+  CLASSES.forEach(([name, i, color], k) => {
+    const y = 240 + k * 26;
+    text(name, 70, y + 8, 12, COLORS.muted);
+    bar(160, y, 380, Math.max(0, Math.min(1, scores[i])), color);
+    text(`${Math.round(scores[i] * 100)}%`, 610, y + 8, 12, COLORS.text, 400, 'right');
+  });
+
+  roundRect(652, 94, 600, 232, 12, COLORS.panel, COLORS.line);
+  text('SERVER', 670, 124, 12, COLORS.muted, 600);
+  const rows = [['Status', `uptime ${(120 + timeline.steps.indexOf(step) * 0.2).toFixed(1)}s`, 'OK', 'NORMAL'],
+    ['BiLSTM model', 'temporal classifier', timeline.model_loaded ? 'LOADED' : 'RULES ONLY',
+     timeline.model_loaded ? 'NORMAL' : 'NO_FACE'],
+    ['Active sessions', '', '1', 'NO_FACE']];
+  rows.forEach(([name, meta, value, tone], k) => {
+    const y = 140 + k * 60;
+    text(name, 670, y + 18, 14, COLORS.text, 600);
+    if (meta) text(meta, 670, y + 36, 12, COLORS.muted);
+    ctx.font = `700 12px ${FONT}`;
+    const w = ctx.measureText(value).width + 22;
+    roundRect(1234 - w, y + 6, w, 26, 6, TINT[tone]);
+    text(value, 1234 - w / 2, y + 23, 12, COLORS[tone], 700, 'center');
+    if (k < 2) { ctx.fillStyle = COLORS.line; ctx.fillRect(670, y + 50, 564, 1); }
+  });
+
+  roundRect(28, 350, 1224, 346, 12, COLORS.panel, COLORS.line);
+  text('EVENT LOG', 46, 380, 12, COLORS.muted, 600);
+  const cols = [46, 230, 430, 590, 720, 860];
+  ['TIME', 'NODE', 'STATE', 'SOURCE', 'PERCLOS', 'REASON'].forEach((h, k) => text(h, cols[k], 408, 11, COLORS.muted, 600));
+  const shown = timeline.events.filter(e => e.frame <= frame).reverse().slice(0, 7);
+  if (!shown.length) text('no events yet', 640, 470, 13, COLORS.muted, 400, 'center');
+  shown.forEach((e, k) => {
+    const y = 420 + k * 38;
+    ctx.fillStyle = COLORS.line; ctx.fillRect(46, y, 1188, 1);
+    const st = safeState(e.state);
+    text(clockFor(e.t, clock), cols[0], y + 25, 13, COLORS.text);
+    text('DEMO_REPLAY', cols[1], y + 25, 13, COLORS.text);
+    text(st, cols[2], y + 25, 13, COLORS[st], 700);
+    ctx.font = `400 11px ${FONT}`;
+    const sw = ctx.measureText(e.source).width + 12;
+    roundRect(cols[3], y + 11, sw, 19, 4, null, COLORS.line);
+    text(e.source, cols[3] + 6, y + 25, 11, COLORS.muted);
+    text(e.perclos ? `${Math.round(e.perclos * 100)}%` : '—', cols[4], y + 25, 13, COLORS.text);
+    text(e.reasons.join(' | ') || '—', cols[5], y + 25, 13, COLORS.muted);
+  });
+  ctx.restore();
+}
+
+function drawDriver(ox, oy, w, h, frame) {
+  ctx.drawImage(video, ox, oy, w, h);
+  const s = w / 640;
+  ctx.save(); ctx.translate(ox, oy); ctx.scale(s, s);
+  ctx.fillStyle = 'rgba(15,17,21,.68)'; ctx.fillRect(0, 0, 300, 118);
+  const truth = String(timeline.truth[frame] || '').toUpperCase();
+  text(`Ground truth: ${truth}`, 12, 26, 15, COLORS.text, 600);
+  const fs = timeline.frame_scores[frame];
+  CLASSES.forEach(([name, i, color], k) => {
+    const y = 44 + k * 24;
+    text(name, 12, y + 8, 12, COLORS.muted);
+    const v = Math.max(0, Math.min(1, fs[i]));
+    ctx.fillStyle = '#252a34'; ctx.fillRect(100, y, 140, 10);
+    ctx.fillStyle = color; ctx.fillRect(100, y, 140 * v, 10);
+    text(`${Math.round(v * 100)}%`, 290, y + 9, 12, COLORS.text, 400, 'right');
+  });
+  ctx.restore();
+}
+
+function drawCaption(y, w, seg) {
+  ctx.fillStyle = '#15110f'; ctx.fillRect(0, y, w, CAPTION_H);
+  text(seg.title, 16, y + 30, 20, COLORS.text, 700);
+  text(seg.text, 16, y + 56, 14, COLORS.muted);
+}
+
+function drawFrame(layout, frame, seg, clock) {
+  const [w, h] = SIZES[layout];
+  if (layout === 'driver') drawDriver(0, 0, 640, 480, frame);
+  else if (layout === 'dashboard') drawDashboard(0, 0, frame, clock);
+  else { drawDriver(0, 0, 960, DASH_H, frame); drawDashboard(960, 0, frame, clock); }
+  drawCaption(h, w, seg);
+}
+
+function seek(t) {
+  return new Promise(resolve => {
+    video.addEventListener('seeked', resolve, {once: true});
+    video.currentTime = t;
+  });
+}
+
+async function generate(state, layout, label) {
+  const seg = timeline.segments[state];
+  const fps = timeline.fps;
+  const [start, end] = seg.frames;
+  const [w, h] = SIZES[layout];
+  canvas.width = w; canvas.height = h + CAPTION_H;
+  canvas.style.display = 'block';
+  const clock = {base: Date.now(), t0: stepFor(start).t};
+  const [mime, ext] = pickMime();
+
+  await seek(start / fps + 0.01);
+  drawFrame(layout, start, seg, clock);
+  const stream = canvas.captureStream(30);
+  const recorder = new MediaRecorder(stream, {mimeType: mime, videoBitsPerSecond: 6_000_000});
+  const chunks = [];
+  recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  const stopped = new Promise(resolve => { recorder.onstop = resolve; });
+  recorder.start(250);
+  status(`${label}: recording ${LABELS[state]} · ${LABELS[layout]}…`);
+  await video.play();
+
+  await new Promise(resolve => {
+    const endT = end / fps;
+    const tick = () => {
+      const t = video.currentTime;
+      const frame = Math.min(end - 1, Math.max(start, Math.floor(t * fps + 1e-3)));
+      drawFrame(layout, frame, seg, clock);
+      progress((t - start / fps) / (endT - start / fps));
+      if (t >= endT || video.ended) { video.pause(); setTimeout(resolve, 200); return; }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  recorder.stop();
+  await stopped;
+  stream.getTracks().forEach(t => t.stop());
+  return {blob: new Blob(chunks, {type: mime.split(';')[0]}), ext};
+}
+
+function addResult(state, layout, blob, ext) {
+  const results = $('results');
+  results.querySelector('.empty')?.remove();
+  const url = URL.createObjectURL(blob);
+  const name = `drowsim_${layout}_${state}.${ext}`;
+  const card = document.createElement('div'); card.className = 'result';
+  const title = document.createElement('div'); title.className = 'name';
+  title.textContent = `${LABELS[state]} · ${LABELS[layout]}`;
+  const player = document.createElement('video'); player.src = url; player.controls = true; player.muted = true;
+  const link = document.createElement('a'); link.href = url; link.download = name;
+  link.textContent = `Download ${name} (${(blob.size / 1e6).toFixed(1)} MB)`;
+  card.append(title, player, link);
+  results.prepend(card);
+}
+
+async function run(jobs) {
+  if (busy) return;
+  busy = true; $('one').disabled = $('all').disabled = true;
+  try {
+    for (let i = 0; i < jobs.length; i++) {
+      const [state, layout] = jobs[i];
+      const label = jobs.length > 1 ? `${i + 1} of ${jobs.length}` : 'Video';
+      const {blob, ext} = await generate(state, layout, label);
+      addResult(state, layout, blob, ext);
+    }
+    status(jobs.length > 1 ? `All ${jobs.length} videos are ready below.` : 'Ready below.');
+  } catch (err) {
+    status(`Could not make the video: ${err.message || err}`);
+  } finally {
+    busy = false; $('one').disabled = $('all').disabled = false; progress(0);
+  }
+}
+
+$('one').addEventListener('click', () => {
+  const state = document.querySelector('input[name=state]:checked').value;
+  const layout = document.querySelector('input[name=layout]:checked').value;
+  run([[state, layout]]);
+});
+$('all').addEventListener('click', () => {
+  const jobs = [];
+  for (const s of ['alert', 'yawning', 'microsleep'])
+    for (const l of ['side_by_side', 'dashboard', 'driver']) jobs.push([s, l]);
+  run(jobs);
+});
+
+async function init() {
+  fetch('/health').then(r => r.json()).then(h => { $('signout').hidden = !h.auth_required; }).catch(() => {});
+  if (!pickMime() || !HTMLCanvasElement.prototype.captureStream) {
+    status('This browser cannot record video. Use a recent Chrome, Edge, Firefox or Safari.');
+    return;
+  }
+  try {
+    const tlRes = await fetch('/api/demo/timeline');
+    if (tlRes.status === 401) { location.href = '/login'; return; }
+    if (!tlRes.ok) throw new Error((await tlRes.json()).detail || tlRes.statusText);
+    timeline = await tlRes.json();
+    const clip = await fetch('/api/demo/clip');
+    if (!clip.ok) throw new Error('the demo clip could not be loaded');
+    video.src = URL.createObjectURL(await clip.blob());
+    await new Promise((resolve, reject) => {
+      video.addEventListener('loadeddata', resolve, {once: true});
+      video.addEventListener('error', () => reject(new Error('the demo clip could not be decoded')), {once: true});
+    });
+    status('Ready. Pick a state and a layout, then Generate.');
+    $('one').disabled = $('all').disabled = false;
+  } catch (err) {
+    status(`Not available: ${err.message || err}`);
+  }
+}
+init();
+</script>
+</body>
+</html>

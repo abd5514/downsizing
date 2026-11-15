@@ -200,37 +200,11 @@ def _rule_state_from_packet(session: Session, packet: TelemetryPacket) -> object
     return verdict
 
 
-@app.post("/infer", response_model=InferenceResponse)
-def infer(packet: TelemetryPacket) -> InferenceResponse:
-    if packet.session_id == DEMO_SESSION_ID:
-        raise HTTPException(422, "session id is reserved")
-    with _state_lock:
-        return _infer(packet)
+def _decide(session: Session, packet: TelemetryPacket):
+    """Run one packet through the rules and the BiLSTM for a session.
 
-
-def _infer(packet: TelemetryPacket) -> InferenceResponse:
-    started = time.perf_counter()
-    now = time.monotonic()
-    _reap_sessions(now)
-
-    if not packet.feature_width_ok():
-        raise HTTPException(422, f"every feature row must be {cfg.FEATURE_DIM} wide")
-
-    session = sessions.get(packet.session_id)
-    if session is None:
-        if len(sessions) >= MAX_SESSIONS and packet.session_id != DEMO_SESSION_ID:
-            raise HTTPException(429, "too many active sessions")
-        session = Session(client_id=packet.client_id)
-        sessions[packet.session_id] = session
-
-    # A gap in the sequence means we would otherwise reason over a window with
-    # a hole in it. Drop the buffer and let it refill instead.
-    if session.last_seq >= 0 and packet.seq != session.last_seq + 1:
-        session.buffer.clear()
-        session.votes.clear()
-    session.last_seq = packet.seq
-    session.last_seen = now
-
+    Shared by live inference and the demo timeline, so a generated video shows
+    exactly the verdicts the live dashboard would."""
     rule_verdict = _rule_state_from_packet(session, packet)
     if packet.features:
         rows = np.asarray(packet.features, dtype=np.float32)
@@ -273,6 +247,42 @@ def _infer(packet: TelemetryPacket) -> InferenceResponse:
         state, source, reasons = model_state, "MODEL", ["yawning detected by model"]
     else:
         state, source, reasons = cfg.STATE_NORMAL, "MODEL" if model_state else "RULE", []
+
+    return state, source, reasons, rule_verdict, confidence
+
+
+@app.post("/infer", response_model=InferenceResponse)
+def infer(packet: TelemetryPacket) -> InferenceResponse:
+    if packet.session_id == DEMO_SESSION_ID:
+        raise HTTPException(422, "session id is reserved")
+    with _state_lock:
+        return _infer(packet)
+
+
+def _infer(packet: TelemetryPacket) -> InferenceResponse:
+    started = time.perf_counter()
+    now = time.monotonic()
+    _reap_sessions(now)
+
+    if not packet.feature_width_ok():
+        raise HTTPException(422, f"every feature row must be {cfg.FEATURE_DIM} wide")
+
+    session = sessions.get(packet.session_id)
+    if session is None:
+        if len(sessions) >= MAX_SESSIONS and packet.session_id != DEMO_SESSION_ID:
+            raise HTTPException(429, "too many active sessions")
+        session = Session(client_id=packet.client_id)
+        sessions[packet.session_id] = session
+
+    # A gap in the sequence means we would otherwise reason over a window with
+    # a hole in it. Drop the buffer and let it refill instead.
+    if session.last_seq >= 0 and packet.seq != session.last_seq + 1:
+        session.buffer.clear()
+        session.votes.clear()
+    session.last_seq = packet.seq
+    session.last_seen = now
+
+    state, source, reasons, rule_verdict, confidence = _decide(session, packet)
 
     if state != session.last_state:
         events.appendleft(
@@ -452,6 +462,90 @@ async def update_profile(request: Request) -> Response:
     return JSONResponse({"username": ADMIN_USER, **admin_profile})
 
 
+DEMO_DIR = Path(__file__).resolve().parent / "demo"
+DEMO_CLIP = DEMO_DIR / "demo_clip.mp4"
+DEMO_LABELS = DEMO_DIR / "demo_clip_labels.json"
+DEMO_SEGMENTS = {
+    "alert": {"frames": [82, 152], "title": "ALERT \u2192 NORMAL",
+              "text": "Eyes open and attentive: the alert score stays high, the badge stays green."},
+    "yawning": {"frames": [5, 68], "title": "YAWNING \u2192 WARNING",
+                "text": "The model flags the yawn a few seconds in; the badge turns amber."},
+    "microsleep": {"frames": [135, 235], "title": "MICROSLEEP \u2192 CRITICAL",
+                   "text": "Eyes closed for 0.8 s: the rule raises CRITICAL at once."},
+}
+_demo_path: Path | None = None
+_timeline_cache: dict | None = None
+_timeline_lock = threading.Lock()
+
+
+def _build_timeline(path: Path) -> dict:
+    """Run the whole demo recording through a private session, frame by frame.
+
+    Nothing touches the live sessions or event log; the result is what the
+    dashboard shows at every moment of one replay loop."""
+    packets = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    labels = json.loads(DEMO_LABELS.read_text())
+    session = Session(client_id=DEMO_CLIENT_ID)
+    first_ts = packets[0]["timestamp"]
+    frame = 0
+    steps, timeline_events, frame_scores = [], [], []
+    for raw in packets:
+        packet = TelemetryPacket(**{**raw, "client_id": DEMO_CLIENT_ID,
+                                    "session_id": DEMO_SESSION_ID})
+        state, source, reasons, verdict, _ = _decide(session, packet)
+        n = len(packet.features)
+        for row in packet.features:
+            frame_scores.append([round(float(row[cfg.IDX_ALERT]), 3),
+                                 round(float(row[cfg.IDX_YAWNING]), 3),
+                                 round(float(row[cfg.IDX_MICROSLEEP]), 3)])
+        perclos = round(verdict.perclos if verdict else 0.0, 4)
+        steps.append({
+            "first_frame": frame, "last_frame": frame + n - 1,
+            "t": round(packet.timestamp - first_ts, 3),
+            "scores": [round(v, 3) for v in session.scores],
+            "state": state,
+        })
+        if state != session.last_state:
+            timeline_events.append({"frame": frame + n - 1, "t": round(packet.timestamp - first_ts, 3),
+                                    "state": state, "source": source, "reasons": reasons,
+                                    "perclos": perclos})
+            session.last_state = state
+        frame += n
+    return {
+        "fps": labels.get("fps", 10),
+        "frames": frame,
+        "truth": labels["labels"][:frame],
+        "frame_scores": frame_scores,
+        "steps": steps,
+        "events": timeline_events,
+        "segments": DEMO_SEGMENTS,
+        "model_loaded": models.loaded,
+    }
+
+
+@app.get("/videos")
+def videos_page() -> FileResponse:
+    return FileResponse(DASHBOARD / "videos.html", headers=NO_STORE)
+
+
+@app.get("/api/demo/timeline")
+def demo_timeline() -> dict:
+    global _timeline_cache
+    if _demo_path is None or not DEMO_CLIP.exists() or not DEMO_LABELS.exists():
+        raise HTTPException(404, "the demo recording is not available on this server")
+    with _timeline_lock:
+        if _timeline_cache is None:
+            _timeline_cache = _build_timeline(_demo_path)
+        return _timeline_cache
+
+
+@app.get("/api/demo/clip")
+def demo_clip() -> FileResponse:
+    if not DEMO_CLIP.exists():
+        raise HTTPException(404, "the demo clip is not available on this server")
+    return FileResponse(DEMO_CLIP, media_type="video/mp4")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="DrowSim inference server")
     parser.add_argument("--host", default="127.0.0.1")
@@ -463,6 +557,8 @@ def main() -> None:
 
     models.load(args.bilstm)
     if args.demo:
+        global _demo_path
+        _demo_path = Path(args.demo)
         threading.Thread(target=_demo_loop, args=(Path(args.demo),), daemon=True).start()
     import uvicorn
 
